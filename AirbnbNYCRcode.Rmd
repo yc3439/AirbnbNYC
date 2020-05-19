@@ -332,17 +332,6 @@ rf <- randomForest(log_price ~ latitude + longitude + room_type + minimum_nights
 
 ```
 
-
-
-
-
-
-
-
-
-
-
-
 ### 4. Limitations and Future Work
 1. info not enough
 2. still some potetial influecnctial observations
