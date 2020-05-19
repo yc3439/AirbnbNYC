@@ -1,0 +1,361 @@
+---
+title: "5291_finalproject"
+author: "Citina Liang"
+date: "5/4/2020"
+output: pdf_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+# load in some pkgs
+library(ggplot2)
+library(tidyverse)
+library(kableExtra)
+#library(lubridate)
+#library(leaflet)
+```
+
+### 0. Introduction
+We will do a data analysis on the Airbnb NYC, NY dataset. As we know, Smart Pricing is one of the Airbnb machine learning models of Airbnb, which suggests an appropriate price after a client has entered the retal details, and it can also adjust the price automatically based on the changes in demand for simmilar listings.
+
+This project is to do a data analysis to the airbnb price at NYC, and explore metrics to build ourselves' Smart Pricing Model.
+
+
+### 1. Data Cleaning
+```{r}
+# read in data
+airbnb_nyc <- read.csv("AB_NYC_2019.csv", stringsAsFactors = F)
+head(airbnb_nyc, 20)
+dim(airbnb_nyc)
+summary(airbnb_nyc)
+```
+
+```{r}
+# Check for missing values
+apply(airbnb_nyc, 2, function(x) any(is.na(x)))
+sum(airbnb_nyc$name == "") #16 of them missing names
+#"reviews_per_month" and "last_review" got missing values, since missing entries in "last_review" are white space, the function above can't distinguish the missing
+
+# Replace the missing in "reviews_per_month" as 0
+airbnb_nyc_clean <- airbnb_nyc %>% mutate(reviews_per_month = ifelse(is.na(reviews_per_month), 0, reviews_per_month))
+
+# Check uniqueness of some variables
+length(unique(airbnb_nyc$id))
+length(unique(airbnb_nyc$host_id))
+# id is same as number of observations, so we do not need this variable to identify unique rental
+
+# Remove uninformative variables
+# id, host_name, host_id
+airbnb_nyc_clean <- airbnb_nyc_clean %>% select(-c(id, host_name, host_id))
+
+# Change some variables into factors
+airbnb_nyc_clean <-  airbnb_nyc_clean %>% mutate(neighbourhood_group = factor(neighbourhood_group),
+                                                 neighbourhood = factor(neighbourhood),
+                                                 room_type = factor(room_type),
+                                                 last_review = as.Date(last_review))
+
+# Remove oberservations with price out of 0.5% - 99.5% percentiles
+# b/c some prices are 10000 or 0, which doesn't make sense
+quantile(airbnb_nyc_clean$price, c(0.005, 0.995))
+airbnb_nyc_clean <- airbnb_nyc_clean %>% filter(price >= 26 & price <= 1000)
+
+# Remove oberservations with min nights out of 0.1% - 99.9% percentiles
+quantile(airbnb_nyc_clean$minimum_nights, c(0.001, 0.999))
+airbnb_nyc_clean <- airbnb_nyc_clean %>% filter(minimum_nights < 31)
+
+# Remove last_review since it won't be used in model building
+airbnb_nyc_clean <- airbnb_nyc_clean %>% select(-last_review)
+
+head(airbnb_nyc_clean, 10) #%>% kable()# %>% kable_styling("striped", full_width = F)
+dim(airbnb_nyc_clean)
+```
+
+Data source: https://www.kaggle.com/dgomonov/new-york-city-airbnb-open-data/data#
+
+Some details about the data:
+
+1. There are 48895 observations and 16 variables, after cleaning, there are 47709 observations and 12 variables left.
+
+2. Remaining variables:
+name: name of the listing
+neighbourhood_group: location
+neighbourhood: area
+latitude: latitude coordinates
+longitude: longitude coordinates
+room_type: listing space type
+price: price in dollars
+minimum_nights: amount of nights minimum
+number_of_reviews: number of reviews
+reviews_per_month: number of reviews per month
+calculated_host_listings_count: amount of listing per host
+availability_365: number of days when listing is available for booking
+
+### 2.Data Visualizations and EDA
+```{r}
+table(airbnb_nyc_clean$neighbourhood_group)
+df <-  airbnb_nyc_clean %>% group_by(neighbourhood_group) %>% tally() %>% 
+  mutate(prop = n/sum(n)*100,
+         ypos = cumsum(n))
+# ggplot(df, aes(x = reorder(neighbourhood_group, n), n)) +
+#   geom_bar(stat = "identity", fill = "skyblue3") +
+#   coord_polar(start = 0) +
+#   labs(x = "Neighborhood Group",
+#        y = "Number of Listings",
+#        title = "") +
+#   geom_text(aes(label = n), vjust = -.3, size = 3) +
+# #  coord_flip() +
+#   theme_minimal()
+ggplot(df, aes(x="", y=n, fill = neighbourhood_group)) +
+  geom_bar(stat = "identity", col = "white") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = n, x = 1.5, angle = 40), position = position_stack(vjust = 0.5), size = 3) +
+  theme_void() +
+  labs(fill = "Neighbourhood Group") +
+  scale_fill_brewer(palette = "Set1")
+
+#table(airbnb_nyc_clean$neighbourhood)
+df2 <- airbnb_nyc_clean %>% dplyr::filter(neighbourhood_group == "Bronx") %>% 
+  group_by(neighbourhood_group, neighbourhood) %>% tally()
+#df2
+ggplot(df2, aes(x = reorder(neighbourhood, n), n)) +
+  geom_bar(stat = "identity", fill = "#E41A1C") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45),
+        plot.title = element_text(color = "#E41A1C")) +
+  labs(x = "", y = "", title = "Bronx") +
+  geom_text(aes(label = n), vjust = -.3, size = 2) 
+
+df3 <- airbnb_nyc_clean %>% dplyr::filter(neighbourhood_group == "Manhattan") %>% 
+  group_by(neighbourhood_group, neighbourhood) %>% tally()
+#df3
+ggplot(df3, aes(x = reorder(neighbourhood, n), n)) +
+  geom_bar(stat = "identity", fill = "#4DAF4A") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45),
+        plot.title = element_text(color = "#4DAF4A")) +
+  labs(x = "", y = "", title = "Manhattan") +
+  geom_text(aes(label = n), vjust = -.3, size = 2) 
+
+df4 <- airbnb_nyc_clean %>% dplyr::filter(neighbourhood_group == "Brooklyn") %>% 
+  group_by(neighbourhood_group, neighbourhood) %>% tally()
+#df4
+ggplot(df4, aes(x = reorder(neighbourhood, n), n)) +
+  geom_bar(stat = "identity", fill = "#377EB8") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45),
+        plot.title = element_text(color = "#377EB8")) +
+  labs(x = "", y = "", title = "Brooklyn") +
+  geom_text(aes(label = n), vjust = -.3, size = 2) 
+
+df5 <- airbnb_nyc_clean %>% dplyr::filter(neighbourhood_group == "Queens") %>% 
+  group_by(neighbourhood_group, neighbourhood) %>% tally()
+#df5
+ggplot(df5, aes(x = reorder(neighbourhood, n), n)) +
+  geom_bar(stat = "identity", fill = "#984EA3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45),
+        plot.title = element_text(color = "#984EA3")) +
+  labs(x = "", y = "", title = "Queens") +
+  geom_text(aes(label = n), vjust = -.3, size = 2) 
+
+df6 <- airbnb_nyc_clean %>% dplyr::filter(neighbourhood_group == "Staten Island") %>% 
+  group_by(neighbourhood_group, neighbourhood) %>% tally()
+#df6
+ggplot(df6, aes(x = reorder(neighbourhood, n), n)) +
+  geom_bar(stat = "identity", fill = "#FF7F00") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45), 
+        plot.title = element_text(color = "#FF7F00")) +
+  labs(x = "", y = "", title = "Staten Island") +
+  geom_text(aes(label = n), vjust = -.3, size = 2)
+```
+
+```{r}
+# price vs neighbourgroup
+df8 <- airbnb_nyc_clean %>% group_by(neighbourhood_group) %>% 
+  summarise("Average Price" = mean(price)) 
+df8 %>% 
+  arrange(desc(`Average Price`)) %>% 
+  mutate(` ` = neighbourhood_group) %>% 
+  select(` `, `Average Price`) %>% 
+  kable() %>% 
+  kable_styling("striped", full_width = F)
+
+
+ggplot(df8, aes(x = reorder(neighbourhood_group, `Average Price`), `Average Price`, fill = neighbourhood_group)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = median(airbnb_nyc_clean$price), lty = 2, size = 0.3) +
+  annotate("text", 0.7, median(airbnb_nyc_clean$price), vjust = -1, label = "Median = 106", size = 3) +
+  geom_hline(yintercept = mean(airbnb_nyc_clean$price), lty = 2, size = 0.3) +
+  annotate("text", 0.7, mean(airbnb_nyc_clean$price), vjust = -1, label = "Median = 141", size = 3) +
+  theme_minimal() +
+  labs(x = "", y = "", title = "Average Price Per Night by Neighbourhood Group") +
+  geom_text(aes(label = round(`Average Price`, 2)), vjust = -.3, size = 3) +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+airbnb_nyc_clean %>% filter(neighbourhood_group == "Manhattan") %>% group_by(neighbourhood) %>% summarise(avg_price = mean(price)) %>% arrange(desc(avg_price))
+```
+
+```{r, message=FALSE}
+library(ggmap)
+qmplot(longitude, latitude, data = airbnb_nyc_clean,
+       color = neighbourhood_group,
+       size = I(0.2), alpha = I(0.5))
+
+# price heatmap ($40 - $400) for better visualization
+df7 <- airbnb_nyc_clean %>% filter(price > 40 & price < 400)
+qmplot(longitude, latitude, z = price, data = df7, geom = "blank") + 
+  stat_summary2d(fun = median, alpha = 0.5) +
+  #stat_density_2d(aes(fill = ..level..), geom = "polygon", alpha = 0.3, col = NA) +
+  scale_fill_gradient2("Price\nHeatmap", low = "blue", mid = "yellow", high = "red", midpoint = 150) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# price vs room type
+df9 <- airbnb_nyc_clean %>% group_by(room_type, neighbourhood_group) %>% 
+  summarise("Average Price" = round(mean(price), 2)) %>% arrange(desc(`Average Price`))
+df9 %>% kable() %>% kable_styling("striped", full_width = F)
+
+airbnb_nyc_clean %>% group_by(room_type) %>% 
+  summarise("Average Price" = round(mean(price), 2)) %>% arrange(desc(`Average Price`))
+
+ggplot(df9, aes(room_type, `Average Price`, fill = reorder(neighbourhood_group, `Average Price`))) +
+  geom_bar(stat = "identity", position = "dodge", col = "white") +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Average Price by Neighborhood and Room Type", x = "", y = "") +
+  scale_fill_brewer(palette = "Set1") +
+  geom_text(aes(label = `Average Price`), vjust = -0.5, size = 2.5, position = position_dodge(width = 1))
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+# worldcloud of names
+library(wordcloud)
+library(tm)
+myCorpus <- Corpus(VectorSource(airbnb_nyc_clean$name))
+myCorpus <- tm_map(myCorpus, tolower)
+myCorpus <- tm_map(myCorpus, removeWords, c(stopwords("en"), "new", "york"))
+removeNumPunct <- function(x) gsub("[^[:alpha:][:space:]]*", "", x)
+myCorpus <- tm_map(myCorpus, removeNumPunct)
+inspect(myCorpus[1:10])
+
+tdm <- TermDocumentMatrix(myCorpus)
+m <- as.matrix(tdm)
+wordFreq <- sort(rowSums(m), decreasing=TRUE)
+pal2 <- brewer.pal(8,"Dark2")
+wordcloud(words = names(wordFreq), freq=wordFreq, min.freq=300, random.order=F, use.r.layout = T,  colors=pal2)
+```
+
+```{r, message=FALSE}
+# Correlations between numeric variables
+library(corrplot)
+library(RColorBrewer)
+corr = round(cor(airbnb_nyc_clean[, unlist(lapply(airbnb_nyc_clean, is.numeric))]), 3)
+corrplot(corr, order = "hclust", type = "lower", 
+         col=brewer.pal(n=8, name="RdYlBu"), tl.cex = 0.7, tl.srt = 45)
+```
+
+In all numeric varaiables, only longitude has some linear correlation with price, which make sense, since the longitude determines the area, and so that we believe the categorical variables neighbour group are highly correlated with price, all the other variables are not correlated with price, we will use stepwise model selection later to see if these variables left.
+
+### 3. Model Building
+#### i. Transformation
+```{r}
+par(mfrow = c(2,1))
+ggplot(airbnb_nyc_clean, aes(price)) +
+  geom_histogram(bins = 40, aes(y = ..density..), col = "black", fill = "white") +
+  geom_density(fill = "skyblue2", alpha = 0.5) +
+  labs(x = "Price", y = "", title = "Density Plot of Price") +
+  theme_minimal()
+
+ggplot(airbnb_nyc_clean, aes(log(price))) +
+  geom_histogram(bins = 40, aes(y = ..density..), col = "black", fill = "white") +
+  geom_density(fill = "skyblue2", alpha = 0.6) +
+  labs(x = "Log Price", y = "", title = "Density Plot of Price after Transformation") +
+  theme_minimal()
+par(mfrow = c(1,1))
+```
+
+Price becomes more normal after log transfrom.
+
+```{r, message=FALSE}
+# spliting data
+# drop variables
+set.seed(5291)
+ind <- sample(1:nrow(airbnb_nyc_clean), round(0.8*nrow(airbnb_nyc_clean), 0))
+airbnb_nyc_clean <- airbnb_nyc_clean %>% mutate(log_price = log(price)) %>% select(-c(neighbourhood, name))
+train <- airbnb_nyc_clean[ind,]
+test <- airbnb_nyc_clean[-ind,]
+```
+
+```{r, message=False}
+# full model
+m1 <- lm(log_price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + number_of_reviews + reviews_per_month + calculated_host_listings_count + neighbourhood_group, data = train)
+summary(m1)
+
+step(m1, direction = "both") # desnt remove any variables
+
+# remove latitude since we deduce it can be explained by neighbourhood_group and logitude
+m2 <- lm(formula = log_price ~ longitude + room_type + minimum_nights + 
+    availability_365 + number_of_reviews + reviews_per_month + 
+    calculated_host_listings_count + neighbourhood_group, data = train)
+summary(m2)
+anova(m2, m1)
+# keep latitude, use m1
+
+# remove minimum_nights
+m3 <- lm(log_price ~ latitude + longitude + room_type + availability_365 + number_of_reviews + reviews_per_month + calculated_host_listings_count + neighbourhood_group, data = train)
+summary(m3)
+anova(m3, m1)
+# keep minimum_nights, use m1
+
+# remove neighbourhood_group
+m4 <- lm(log_price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + number_of_reviews + reviews_per_month + calculated_host_listings_count, data = train)
+summary(m4)
+anova(m4, m1)
+
+library(ggfortify)
+autoplot(m1) + theme_minimal()
+
+pred_mlr <- predict(m1, test)
+sse_mlr = sum((test$log_price - pred_mlr)^2)
+ssr_mlr = sum((pred_mlr - mean(test$log_price))^2)
+rsq_mlr = ssr_mlr / (sse_mlr + ssr_mlr)
+rsq_mlr
+```
+
+```{r}
+library(randomForest)
+rf <- randomForest(log_price ~ latitude + longitude + room_type + minimum_nights  + availability_365 + number_of_reviews + reviews_per_month + calculated_host_listings_count + neighbourhood_group, data = train, ntree = 100)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+### 4. Limitations and Future Work
+1. info not enough
+2. still some potetial influecnctial observations
+3. normality assumption: normal qq plot id off on the tail
+4. try more models (ridge, lasso, knn, etc.)
+5. try dimension reduction
+6. cross validation
+
+1. can do a time series analysis with more data from more years
+2. can do a text mining analysis (for example, topic modeling to create new pretictors)
+3. can have external data (area criminal rate, transportation, etc.) to better estimate the price
+
+
+
+
+
